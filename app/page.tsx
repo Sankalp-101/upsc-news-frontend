@@ -180,7 +180,7 @@ export default function Home() {
           </div>
 
           <div className="hidden rounded-full bg-slate-100 px-4 py-2 text-sm text-slate-600 sm:block">
-            Powered by Qwen3
+            Powered by Gemini
           </div>
 
         </div>
