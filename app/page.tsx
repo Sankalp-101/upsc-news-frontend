@@ -49,7 +49,12 @@ export default function Home() {
         }
 
         const data = await response.json();
-        setArticles(data);
+
+setArticles(
+  Array.isArray(data)
+    ? data
+    : data.articles ?? []
+);
       } catch (err) {
         console.error(err);
         setError("Unable to connect to the news server.");
