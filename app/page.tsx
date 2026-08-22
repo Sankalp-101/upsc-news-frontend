@@ -76,15 +76,23 @@ function relevanceClass(score: number) {
 }
 
 export default function Home() {
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [articles, setArticles] =
+    useState<NewsArticle[]>([]);
+
+  const [stats, setStats] =
+    useState<Stats | null>(null);
+
   const [pagination, setPagination] =
     useState<Pagination | null>(null);
 
-  const [categories, setCategories] = useState<string[]>([]);
+  const [categories, setCategories] =
+    useState<string[]>([]);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   const [filter, setFilter] =
     useState<FilterType>("ALL");
@@ -105,10 +113,18 @@ export default function Home() {
       setLoading(true);
       setError("");
 
-      const params = new URLSearchParams();
+      const params =
+        new URLSearchParams();
 
-      params.set("page", String(targetPage));
-      params.set("limit", String(limit));
+      params.set(
+        "page",
+        String(targetPage)
+      );
+
+      params.set(
+        "limit",
+        String(limit)
+      );
 
       if (search.trim()) {
         params.set(
@@ -135,29 +151,38 @@ export default function Home() {
         );
       }
 
-      const response = await fetch(
-        `${API_BASE}/api/news?${params.toString()}`,
-        {
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE}/api/news?${params.toString()}`,
+          {
+            cache: "no-store",
+          }
+        );
 
       if (!response.ok) {
         throw new Error(
-          "Failed to fetch news"
+          `Failed to fetch news: ${response.status}`
         );
       }
 
       const data =
         await response.json();
 
-      setArticles(
+      const receivedArticles =
         Array.isArray(data)
           ? data
-          : data.articles ?? []
+          : Array.isArray(data?.articles)
+            ? data.articles
+            : [];
+
+      setArticles(
+        receivedArticles
       );
 
-      if (data.pagination) {
+      if (
+        data &&
+        data.pagination
+      ) {
         setPagination(
           data.pagination
         );
@@ -165,7 +190,15 @@ export default function Home() {
         setPagination(null);
       }
     } catch (err) {
-      console.error(err);
+      console.error(
+        "Unable to fetch news:",
+        err
+      );
+
+      setArticles([]);
+
+      setPagination(null);
+
       setError(
         "Unable to connect to the news server."
       );
@@ -176,14 +209,22 @@ export default function Home() {
 
   async function fetchStats() {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/stats`,
-        {
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE}/api/stats`,
+          {
+            cache: "no-store",
+          }
+        );
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        console.error(
+          "Stats request failed:",
+          response.status
+        );
+
+        return;
+      }
 
       const data =
         await response.json();
@@ -199,20 +240,32 @@ export default function Home() {
 
   async function fetchCategories() {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/categories`,
-        {
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE}/api/categories`,
+          {
+            cache: "no-store",
+          }
+        );
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        console.error(
+          "Categories request failed:",
+          response.status
+        );
+
+        return;
+      }
 
       const data =
         await response.json();
 
       setCategories(
-        data.categories ?? []
+        Array.isArray(
+          data?.categories
+        )
+          ? data.categories
+          : []
       );
     } catch (err) {
       console.error(
@@ -222,16 +275,26 @@ export default function Home() {
     }
   }
 
+  /*
+   * Load static dashboard data once.
+   */
   useEffect(() => {
     fetchStats();
     fetchCategories();
   }, []);
 
+  /*
+   * When search/filter/category changes,
+   * reset to page 1.
+   *
+   * IMPORTANT:
+   * We do NOT call fetchNews here.
+   * The page effect below handles the fetch.
+   */
   useEffect(() => {
     const timer =
       setTimeout(() => {
         setPage(1);
-        fetchNews(1);
       }, 250);
 
     return () =>
@@ -242,9 +305,20 @@ export default function Home() {
     filter,
   ]);
 
+  /*
+   * Single source of truth for news fetching.
+   *
+   * Whenever page/search/category/filter changes,
+   * fetch the correct data exactly once.
+   */
   useEffect(() => {
     fetchNews(page);
-  }, [page]);
+  }, [
+    page,
+    search,
+    category,
+    filter,
+  ]);
 
   const topArticles =
     useMemo(() => {
@@ -272,7 +346,10 @@ export default function Home() {
             ? article.prelims_relevance
             : article.mains_relevance
       );
-    }, [articles, filter]);
+    }, [
+      articles,
+      filter,
+    ]);
 
   function clearFilters() {
     setSearch("");
@@ -287,9 +364,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f5f7fa] text-slate-950">
 
-      {/* ================================================= */}
       {/* HEADER */}
-      {/* ================================================= */}
 
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur">
 
@@ -336,9 +411,7 @@ export default function Home() {
       </header>
 
 
-      {/* ================================================= */}
       {/* HERO */}
-      {/* ================================================= */}
 
       <section className="border-b border-slate-200 bg-white">
 
@@ -349,16 +422,23 @@ export default function Home() {
             <div>
 
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-blue-700">
+
                 <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+
                 Daily UPSC Brief
+
               </div>
 
               <h1 className="max-w-4xl text-4xl font-black leading-[1.05] tracking-[-0.04em] sm:text-6xl">
+
                 Know what matters.
+
                 <br />
+
                 <span className="text-blue-600">
                   Skip the noise.
                 </span>
+
               </h1>
 
               <p className="mt-6 max-w-2xl text-base leading-7 text-slate-500 sm:text-lg">
@@ -390,7 +470,7 @@ export default function Home() {
             </div>
 
 
-            {/* Brief card */}
+            {/* BRIEF CARD */}
 
             <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-xl">
 
@@ -409,7 +489,8 @@ export default function Home() {
               <div className="mt-8">
 
                 <p className="text-4xl font-black">
-                  {stats?.total_articles ?? articles.length}
+                  {stats?.total_articles ??
+                    articles.length}
                 </p>
 
                 <p className="mt-1 text-sm text-slate-400">
@@ -421,21 +502,27 @@ export default function Home() {
               <div className="mt-6 grid grid-cols-2 gap-3">
 
                 <div className="rounded-xl bg-white/5 p-4">
+
                   <p className="text-2xl font-black text-red-400">
                     {stats?.high_priority ?? 0}
                   </p>
+
                   <p className="mt-1 text-xs text-slate-400">
                     High priority
                   </p>
+
                 </div>
 
                 <div className="rounded-xl bg-white/5 p-4">
+
                   <p className="text-2xl font-black text-blue-300">
                     {stats?.mains_relevant ?? 0}
                   </p>
+
                   <p className="mt-1 text-xs text-slate-400">
                     Mains relevant
                   </p>
+
                 </div>
 
               </div>
@@ -449,16 +536,11 @@ export default function Home() {
       </section>
 
 
-      {/* ================================================= */}
       {/* MAIN */}
-      {/* ================================================= */}
 
       <div className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
 
-
-        {/* ================================================= */}
         {/* STATS */}
-        {/* ================================================= */}
 
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 
@@ -518,9 +600,7 @@ export default function Home() {
         </section>
 
 
-        {/* ================================================= */}
         {/* TOP STORIES */}
-        {/* ================================================= */}
 
         <section
           id="top-stories"
@@ -575,9 +655,11 @@ export default function Home() {
                         )}`}
                       >
                         {article.upsc_relevance}
+
                         <span className="text-sm text-slate-300">
                           /10
                         </span>
+
                       </span>
 
                     </div>
@@ -630,9 +712,7 @@ export default function Home() {
         </section>
 
 
-        {/* ================================================= */}
         {/* NEWS EXPLORER */}
-        {/* ================================================= */}
 
         <section
           id="news"
@@ -832,31 +912,32 @@ export default function Home() {
 
             {/* ERROR */}
 
-            {!loading && error && (
+            {!loading &&
+              error && (
 
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-8">
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-8">
 
-                <p className="font-bold text-red-800">
-                  Unable to load current affairs.
-                </p>
+                  <p className="font-bold text-red-800">
+                    Unable to load current affairs.
+                  </p>
 
-                <p className="mt-2 text-sm text-red-700">
-                  Check your backend deployment
-                  and try again.
-                </p>
+                  <p className="mt-2 text-sm text-red-700">
+                    Check your backend deployment
+                    and try again.
+                  </p>
 
-                <button
-                  onClick={() =>
-                    fetchNews(page)
-                  }
-                  className="mt-5 rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white"
-                >
-                  Try again
-                </button>
+                  <button
+                    onClick={() =>
+                      fetchNews(page)
+                    }
+                    className="mt-5 rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white"
+                  >
+                    Try again
+                  </button>
 
-              </div>
+                </div>
 
-            )}
+              )}
 
 
             {/* EMPTY */}
@@ -928,9 +1009,11 @@ export default function Home() {
                             )}`}
                           >
                             {article.upsc_relevance}
+
                             <span className="text-xs text-slate-300">
                               /10
                             </span>
+
                           </span>
 
                         </div>
@@ -1086,9 +1169,7 @@ export default function Home() {
       </div>
 
 
-      {/* ================================================= */}
       {/* FOOTER */}
-      {/* ================================================= */}
 
       <footer className="border-t border-slate-200 bg-slate-950 text-white">
 
