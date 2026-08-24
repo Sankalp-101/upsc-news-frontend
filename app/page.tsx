@@ -106,7 +106,7 @@ export default function Home() {
   const [page, setPage] =
     useState(1);
 
-  const limit = 12;
+  const limit = 48;
 
   async function fetchNews(targetPage = page) {
     try {
@@ -358,8 +358,28 @@ export default function Home() {
     setPage(1);
   }
 
+    const totalFilteredArticles =
+    visibleArticles.length;
+
   const totalPages =
-    pagination?.pages ?? 1;
+  filter === "PRELIMS" ||
+  filter === "MAINS"
+    ? Math.max(
+        1,
+        Math.ceil(
+          totalFilteredArticles / 12
+        )
+      )
+    : pagination?.pages ?? 1;
+
+const paginatedVisibleArticles =
+  filter === "PRELIMS" ||
+  filter === "MAINS"
+    ? visibleArticles.slice(
+        (page - 1) * 12,
+        page * 12
+      )
+    : visibleArticles;
 
   return (
     <main className="min-h-screen bg-[#f5f7fa] text-slate-950">
@@ -976,12 +996,12 @@ export default function Home() {
 
             {!loading &&
               !error &&
-              visibleArticles.length >
+              paginatedVisibleArticles.length >
                 0 && (
 
                 <div className="grid gap-4 lg:grid-cols-2">
 
-                  {visibleArticles.map(
+                  {paginatedVisibleArticles.map(
                     (article) => (
 
                       <article
