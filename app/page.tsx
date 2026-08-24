@@ -423,6 +423,12 @@ const paginatedVisibleArticles =
             >
               Explore
             </a>
+                        <Link
+              href="/daily-brief"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-blue-700"
+            >
+              Daily Brief →
+            </Link>
 
           </div>
 
