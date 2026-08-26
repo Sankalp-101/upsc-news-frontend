@@ -33,8 +33,34 @@ type ApiResponse = {
   };
 };
 
+type MCQ = {
+  id: number;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_option: "A" | "B" | "C" | "D";
+  explanation: string;
+  difficulty: "easy" | "medium" | "hard";
+  topic: string;
+};
+
+type MCQApiResponse = {
+  article_id: number;
+  count: number;
+  mcqs: MCQ[];
+};
+
+type MCQState = {
+  loading: boolean;
+  error: string;
+  data: MCQ[];
+};
+
 const API_BASE =
-  "https://upsc-news-backend.onrender.com";
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
 
 function formatDate(dateString?: string) {
   if (!dateString) return "";
@@ -84,10 +110,46 @@ function paperClass(paper?: string) {
   return "bg-slate-50 text-slate-600 border-slate-200";
 }
 
+function difficultyClass(
+  difficulty: MCQ["difficulty"]
+) {
+  if (difficulty === "hard") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (difficulty === "medium") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function optionLabel(option: "A" | "B" | "C" | "D") {
+  return option;
+}
+
+function getOptionText(
+  mcq: MCQ,
+  option: "A" | "B" | "C" | "D"
+) {
+  if (option === "A") return mcq.option_a;
+  if (option === "B") return mcq.option_b;
+  if (option === "C") return mcq.option_c;
+  return mcq.option_d;
+}
+
 export default function DailyBriefPage() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [mcqsByArticle, setMcqsByArticle] =
+    useState<Record<number, MCQState>>({});
+
+  const [selectedAnswers, setSelectedAnswers] =
+    useState<Record<string, "A" | "B" | "C" | "D">>(
+      {}
+    );
 
   useEffect(() => {
     async function loadBrief() {
@@ -143,6 +205,10 @@ export default function DailyBriefPage() {
       .slice(0, 6);
   }, [sortedArticles]);
 
+  const mcqArticles = useMemo(() => {
+    return mustRead.slice(0, 3);
+  }, [mustRead]);
+
   const prelimsArticles = useMemo(() => {
     return sortedArticles
       .filter(
@@ -180,9 +246,7 @@ export default function DailyBriefPage() {
     return groups;
   }, [sortedArticles]);
 
-  const today = new Date();
-
-  const todayLabel = today.toLocaleDateString(
+  const todayLabel = new Date().toLocaleDateString(
     "en-IN",
     {
       weekday: "long",
@@ -191,6 +255,78 @@ export default function DailyBriefPage() {
       year: "numeric",
     }
   );
+
+  async function loadMCQs(articleId: number) {
+    const existing = mcqsByArticle[articleId];
+
+    if (existing?.loading) {
+      return;
+    }
+
+    if (existing && !existing.error) {
+      return;
+    }
+
+    setMcqsByArticle((current) => ({
+      ...current,
+      [articleId]: {
+        loading: true,
+        error: "",
+        data: [],
+      },
+    }));
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/news/${articleId}/mcqs`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Backend returned ${response.status}`
+        );
+      }
+
+      const data: MCQApiResponse =
+        await response.json();
+
+      setMcqsByArticle((current) => ({
+        ...current,
+        [articleId]: {
+          loading: false,
+          error: "",
+          data: data.mcqs ?? [],
+        },
+      }));
+    } catch (err) {
+      console.error(err);
+
+      setMcqsByArticle((current) => ({
+        ...current,
+        [articleId]: {
+          loading: false,
+          error: "Unable to load MCQs for this article.",
+          data: [],
+        },
+      }));
+    }
+  }
+
+  function selectAnswer(
+    articleId: number,
+    mcqId: number,
+    answer: "A" | "B" | "C" | "D"
+  ) {
+    const key = `${articleId}-${mcqId}`;
+
+    setSelectedAnswers((current) => ({
+      ...current,
+      [key]: answer,
+    }));
+  }
 
   return (
     <main className="min-h-screen bg-[#f5f7fa] text-slate-950">
@@ -206,30 +342,24 @@ export default function DailyBriefPage() {
               ← Back to News
             </Link>
 
-            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
-              Daily Revision
+            <span className="text-xs font-semibold text-slate-400">
+              {todayLabel}
             </span>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-blue-600">
-              UPSC Current Affairs
-            </p>
+          <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
+            Daily UPSC Brief
+          </p>
 
-            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-              Daily UPSC Brief
-            </h1>
+          <h1 className="mt-2 text-4xl font-black tracking-tight">
+            Today's Current Affairs
+          </h1>
 
-            <p className="mt-2 text-sm text-slate-500">
-              {todayLabel}
-            </p>
-
-            <p className="mt-5 max-w-3xl text-sm leading-6 text-slate-600">
-              A focused study view of the most relevant
-              current affairs, organized for Prelims,
-              Mains and GS-wise revision.
-            </p>
-          </div>
+          <p className="mt-5 max-w-3xl text-sm leading-6 text-slate-600">
+            A focused study view of the most relevant
+            current affairs, organized for Prelims,
+            Mains and GS-wise revision.
+          </p>
         </header>
 
         {/* LOADING */}
@@ -394,6 +524,234 @@ export default function DailyBriefPage() {
                   ))}
                 </div>
               )}
+            </section>
+
+            {/* MCQ PRACTICE */}
+            <section className="mb-10 rounded-3xl border border-indigo-200 bg-indigo-50/40 p-6 sm:p-8">
+              <div className="mb-6">
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-indigo-600">
+                  Prelims practice
+                </p>
+
+                <h2 className="mt-1 text-2xl font-black">
+                  Test Yourself
+                </h2>
+
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                  Practice MCQs generated from the highest-priority
+                  current affairs. Questions are loaded only when you
+                  request them.
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                {mcqArticles.length === 0 ? (
+                  <div className="rounded-2xl border border-indigo-100 bg-white p-6 text-sm text-slate-500">
+                    No high-priority articles are available for MCQ
+                    practice.
+                  </div>
+                ) : (
+                  mcqArticles.map((article) => {
+                    const state =
+                      mcqsByArticle[article.id];
+
+                    return (
+                      <div
+                        key={article.id}
+                        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">
+                              Article {article.id}
+                            </p>
+
+                            <h3 className="mt-1 text-lg font-black">
+                              {article.title}
+                            </h3>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              loadMCQs(article.id)
+                            }
+                            disabled={state?.loading}
+                            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {state?.loading
+                              ? "Loading MCQs..."
+                              : state && !state.error
+                                ? "MCQs Loaded"
+                                : "Load MCQs"}
+                          </button>
+                        </div>
+
+                        {state?.error && (
+                          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                            {state.error}
+                          </div>
+                        )}
+
+                        {state &&
+                          !state.loading &&
+                          !state.error &&
+                          state.data.length === 0 && (
+                            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                              No MCQs have been generated for this
+                              article yet.
+                            </div>
+                          )}
+
+                        {state &&
+                          !state.loading &&
+                          !state.error &&
+                          state.data.length > 0 && (
+                            <div className="mt-6 space-y-6">
+                              {state.data.map(
+                                (mcq, index) => {
+                                  const answerKey = `${article.id}-${mcq.id}`;
+                                  const selected =
+                                    selectedAnswers[
+                                      answerKey
+                                    ];
+
+                                  const answered =
+                                    Boolean(selected);
+
+                                  return (
+                                    <div
+                                      key={mcq.id}
+                                      className="border-t border-slate-100 pt-6 first:border-t-0 first:pt-0"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+                                          Question {index + 1}
+                                        </span>
+
+                                        <span
+                                          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${difficultyClass(
+                                            mcq.difficulty
+                                          )}`}
+                                        >
+                                          {mcq.difficulty}
+                                        </span>
+
+                                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+                                          {mcq.topic}
+                                        </span>
+                                      </div>
+
+                                      <h4 className="mt-4 text-base font-black leading-6 text-slate-900">
+                                        {mcq.question}
+                                      </h4>
+
+                                      <div className="mt-4 grid gap-3">
+                                        {(
+                                          [
+                                            "A",
+                                            "B",
+                                            "C",
+                                            "D",
+                                          ] as const
+                                        ).map(
+                                          (option) => {
+                                            const isSelected =
+                                              selected ===
+                                              option;
+
+                                            const isCorrect =
+                                              mcq.correct_option ===
+                                              option;
+
+                                            let optionClass =
+                                              "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50";
+
+                                            if (
+                                              answered &&
+                                              isCorrect
+                                            ) {
+                                              optionClass =
+                                                "border-emerald-300 bg-emerald-50";
+                                            } else if (
+                                              answered &&
+                                              isSelected &&
+                                              !isCorrect
+                                            ) {
+                                              optionClass =
+                                                "border-red-300 bg-red-50";
+                                            } else if (
+                                              isSelected
+                                            ) {
+                                              optionClass =
+                                                "border-indigo-400 bg-indigo-50";
+                                            }
+
+                                            return (
+                                              <button
+                                                key={option}
+                                                type="button"
+                                                onClick={() =>
+                                                  selectAnswer(
+                                                    article.id,
+                                                    mcq.id,
+                                                    option
+                                                  )
+                                                }
+                                                className={`w-full rounded-xl border p-4 text-left transition ${optionClass}`}
+                                              >
+                                                <div className="flex items-start gap-3">
+                                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-700">
+                                                    {optionLabel(
+                                                      option
+                                                    )}
+                                                  </span>
+
+                                                  <span className="text-sm font-semibold leading-6 text-slate-800">
+                                                    {getOptionText(
+                                                      mcq,
+                                                      option
+                                                    )}
+                                                  </span>
+                                                </div>
+                                              </button>
+                                            );
+                                          }
+                                        )}
+                                      </div>
+
+                                      {answered && (
+                                        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                          <p
+                                            className={`text-sm font-black ${
+                                              selected ===
+                                              mcq.correct_option
+                                                ? "text-emerald-700"
+                                                : "text-red-700"
+                                            }`}
+                                          >
+                                            {selected ===
+                                            mcq.correct_option
+                                              ? "Correct"
+                                              : `Incorrect — correct answer: ${mcq.correct_option}`}
+                                          </p>
+
+                                          <p className="mt-2 text-sm leading-6 text-slate-700">
+                                            {mcq.explanation}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                              )}
+                            </div>
+                          )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </section>
 
             {/* GS REVISION */}
