@@ -9,6 +9,7 @@ type Article = {
   source?: string;
   url?: string;
   published_at?: string;
+  published_date?: string | null;
   category?: string;
   upsc_relevance?: number;
   priority?: string;
@@ -31,6 +32,11 @@ type ApiResponse = {
     total: number;
     pages: number;
   };
+};
+
+type ArchiveDate = {
+  date: string;
+  count: number;
 };
 
 type MCQ = {
@@ -60,7 +66,7 @@ type MCQState = {
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
-  "http://127.0.0.1:8000";
+  "https://upsc-news-backend.onrender.com";
 
 function formatDate(dateString?: string) {
   if (!dateString) return "";
@@ -142,6 +148,8 @@ export default function DailyBriefPage() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [availableDates, setAvailableDates] = useState<ArchiveDate[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
 
   const [mcqsByArticle, setMcqsByArticle] =
     useState<Record<number, MCQState>>({});
@@ -151,42 +159,79 @@ export default function DailyBriefPage() {
       {}
     );
 
-  useEffect(() => {
-    async function loadBrief() {
-      try {
-        setLoading(true);
-        setError("");
+  async function loadBrief(targetDate = selectedDate) {
+    try {
+      setLoading(true);
+      setError("");
 
-        const response = await fetch(
-          `${API_BASE}/api/news?page=1&limit=48`,
-          {
-            cache: "no-store",
-          }
+      const url = targetDate
+        ? `${API_BASE}/api/news?page=1&limit=48&date=${targetDate}`
+        : `${API_BASE}/api/news?page=1&limit=48`;
+
+      const response = await fetch(url, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Backend returned ${response.status}`
         );
+      }
 
-        if (!response.ok) {
-          throw new Error(
-            `Backend returned ${response.status}`
-          );
+      const data: ApiResponse =
+        await response.json();
+
+      setArticles(data.articles ?? []);
+    } catch (err) {
+      console.error(err);
+      setError(
+        "Unable to load UPSC brief for this date."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchArchiveDates() {
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/archive/dates`,
+        {
+          cache: "no-store",
         }
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      setAvailableDates(
+        Array.isArray(data?.available_dates) ? data.available_dates : []
+      );
+    } catch (err) {
+      console.error("Unable to fetch archive dates", err);
+    }
+  }
 
-        const data: ApiResponse =
-          await response.json();
-
-        setArticles(data.articles ?? []);
-      } catch (err) {
-        console.error(err);
-
-        setError(
-          "Unable to load today's UPSC brief."
-        );
-      } finally {
-        setLoading(false);
+  useEffect(() => {
+    fetchArchiveDates();
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlDate = params.get("date");
+      if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) {
+        setSelectedDate(urlDate);
+        loadBrief(urlDate);
+        return;
       }
     }
-
-    loadBrief();
+    loadBrief("");
   }, []);
+
+  function handleDateSelect(newDate: string) {
+    setSelectedDate(newDate);
+    if (typeof window !== "undefined") {
+      const newUrl = newDate ? `/daily-brief?date=${newDate}` : "/daily-brief";
+      window.history.pushState(null, "", newUrl);
+    }
+    loadBrief(newDate);
+  }
 
   const sortedArticles = useMemo(() => {
     return [...articles].sort(
@@ -259,11 +304,7 @@ export default function DailyBriefPage() {
   async function loadMCQs(articleId: number) {
     const existing = mcqsByArticle[articleId];
 
-    if (existing?.loading) {
-      return;
-    }
-
-    if (existing && !existing.error) {
+    if (existing && existing.data.length > 0) {
       return;
     }
 
@@ -331,7 +372,6 @@ export default function DailyBriefPage() {
   return (
     <main className="min-h-screen bg-[#f5f7fa] text-slate-950">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-
         {/* HEADER */}
         <header className="mb-8">
           <div className="mb-3 flex items-center justify-between gap-4">
@@ -347,26 +387,59 @@ export default function DailyBriefPage() {
             </span>
           </div>
 
-          <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
-            Daily UPSC Brief
-          </p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
+                Daily UPSC Brief
+              </p>
 
-          <h1 className="mt-2 text-4xl font-black tracking-tight">
-            Today's Current Affairs
-          </h1>
+              <h1 className="mt-2 text-4xl font-black tracking-tight">
+                {selectedDate
+                  ? `Brief for ${formatDate(selectedDate)}`
+                  : "Today's Current Affairs"}
+              </h1>
 
-          <p className="mt-5 max-w-3xl text-sm leading-6 text-slate-600">
-            A focused study view of the most relevant
-            current affairs, organized for Prelims,
-            Mains and GS-wise revision.
-          </p>
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600">
+                A focused study view of the most relevant current affairs, organized for Prelims, Mains and GS-wise revision.
+              </p>
+            </div>
+
+            {/* Date Archive Selector in Daily Brief */}
+            {availableDates.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                <span className="text-xs font-bold text-slate-500">
+                  Select Date:
+                </span>
+                <select
+                  value={selectedDate}
+                  onChange={(e) => handleDateSelect(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"
+                >
+                  <option value="">Latest Today</option>
+                  {availableDates.map((d) => (
+                    <option key={d.date} value={d.date}>
+                      {formatDate(d.date)} ({d.count} stories)
+                    </option>
+                  ))}
+                </select>
+                {selectedDate && (
+                  <button
+                    onClick={() => handleDateSelect("")}
+                    className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         {/* LOADING */}
         {loading && (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
             <p className="font-semibold text-slate-700">
-              Preparing today's brief...
+              Preparing UPSC brief...
             </p>
 
             <p className="mt-2 text-sm text-slate-500">
@@ -433,11 +506,11 @@ export default function DailyBriefPage() {
               </div>
             </section>
 
-            {/* MUST READ */}
-            <section className="mb-10">
+            {/* MUST READ SECTION */}
+            <section className="mb-12">
               <div className="mb-4">
                 <p className="text-xs font-bold uppercase tracking-[0.15em] text-red-600">
-                  Priority reading
+                  Priority 1
                 </p>
 
                 <h2 className="mt-1 text-2xl font-black">
@@ -445,33 +518,39 @@ export default function DailyBriefPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Start here if you have limited study time.
+                  Top 6 articles with highest UPSC relevance.
                 </p>
               </div>
 
               {mustRead.length === 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
-                  No high-priority articles available.
+                  No high-relevance articles found for this selection.
                 </div>
               ) : (
-                <div className="grid gap-5 lg:grid-cols-2">
-                  {mustRead.map((article) => (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {mustRead.map((article, index) => (
                     <article
                       key={article.id}
-                      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md"
                     >
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-300">
+                          0{index + 1}
+                        </span>
+
                         <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${relevanceClass(
+                          className={`rounded-md border px-2 py-0.5 text-xs font-bold ${relevanceClass(
                             article.upsc_relevance
                           )}`}
                         >
                           {article.upsc_relevance ?? 0}/10
                         </span>
+                      </div>
 
+                      <div className="mt-3 flex flex-wrap gap-1.5">
                         {article.primary_gs_paper && (
                           <span
-                            className={`rounded-full border px-2.5 py-1 text-xs font-bold ${paperClass(
+                            className={`rounded px-2 py-0.5 text-[10px] font-bold border ${paperClass(
                               article.primary_gs_paper
                             )}`}
                           >
@@ -479,45 +558,43 @@ export default function DailyBriefPage() {
                           </span>
                         )}
 
-                        {article.prelims_relevance && (
-                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
-                            PRELIMS
-                          </span>
-                        )}
-
-                        {article.mains_relevance && (
-                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                            MAINS
+                        {article.category && (
+                          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {article.category}
                           </span>
                         )}
                       </div>
 
-                      <h3 className="mt-4 text-xl font-black leading-tight">
+                      <h3 className="mt-3 text-base font-bold leading-snug">
                         {article.title}
                       </h3>
 
-                      <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">
+                      <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">
                         {article.summary}
                       </p>
 
                       {article.why_important_for_upsc && (
-                        <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        <div className="mt-3 rounded-lg bg-blue-50/60 p-2.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-blue-700">
                             Why it matters
                           </p>
 
-                          <p className="mt-1 text-sm leading-6 text-slate-700">
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-700">
                             {article.why_important_for_upsc}
                           </p>
                         </div>
                       )}
 
-                      <div className="mt-5">
+                      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+                        <span className="text-[11px] text-slate-400">
+                          {article.source}
+                        </span>
+
                         <Link
                           href={`/news/${article.id}`}
-                          className="inline-flex items-center rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800"
+                          className="text-xs font-bold text-blue-600 hover:text-blue-700"
                         >
-                          Read Full Analysis →
+                          Analyze →
                         </Link>
                       </div>
                     </article>
@@ -526,380 +603,278 @@ export default function DailyBriefPage() {
               )}
             </section>
 
-            {/* MCQ PRACTICE */}
-            <section className="mb-10 rounded-3xl border border-indigo-200 bg-indigo-50/40 p-6 sm:p-8">
-              <div className="mb-6">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-indigo-600">
-                  Prelims practice
-                </p>
+            {/* PRELIMS QUICK TEST */}
+            {mcqArticles.length > 0 && (
+              <section className="mb-12">
+                <div className="mb-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
+                    Daily Practice
+                  </p>
 
-                <h2 className="mt-1 text-2xl font-black">
-                  Test Yourself
-                </h2>
+                  <h2 className="mt-1 text-2xl font-black">
+                    Prelims Quick Practice
+                  </h2>
 
-                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-                  Practice MCQs generated from the highest-priority
-                  current affairs. Questions are loaded only when you
-                  request them.
-                </p>
-              </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Practice exam-standard MCQs directly based on today&apos;s must-read articles.
+                  </p>
+                </div>
 
-              <div className="space-y-6">
-                {mcqArticles.length === 0 ? (
-                  <div className="rounded-2xl border border-indigo-100 bg-white p-6 text-sm text-slate-500">
-                    No high-priority articles are available for MCQ
-                    practice.
-                  </div>
-                ) : (
-                  mcqArticles.map((article) => {
+                <div className="grid gap-6 lg:grid-cols-3">
+                  {mcqArticles.map((article) => {
                     const state =
-                      mcqsByArticle[article.id];
+                      mcqsByArticle[article.id] ?? {
+                        loading: false,
+                        error: "",
+                        data: [],
+                      };
 
                     return (
                       <div
                         key={article.id}
-                        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                        className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">
-                              Article {article.id}
-                            </p>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
+                              {article.primary_gs_paper ?? "Current Affairs"}
+                            </span>
 
-                            <h3 className="mt-1 text-lg font-black">
-                              {article.title}
-                            </h3>
+                            <span className="text-xs font-bold text-slate-400">
+                              {article.upsc_relevance ?? 0}/10
+                            </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              loadMCQs(article.id)
-                            }
-                            disabled={state?.loading}
-                            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {state?.loading
-                              ? "Loading MCQs..."
-                              : state && !state.error
-                                ? "MCQs Loaded"
-                                : "Load MCQs"}
-                          </button>
-                        </div>
+                          <h3 className="mt-2 text-sm font-bold leading-snug">
+                            {article.title}
+                          </h3>
 
-                        {state?.error && (
-                          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                            {state.error}
-                          </div>
-                        )}
+                          {/* MCQ LIST */}
+                          {state.data.length > 0 && (
+                            <div className="mt-4 space-y-4">
+                              {state.data.map((mcq, mIndex) => {
+                                const answerKey = `${article.id}-${mcq.id}`;
+                                const selected = selectedAnswers[answerKey];
+                                const isCorrect = selected === mcq.correct_option;
 
-                        {state &&
-                          !state.loading &&
-                          !state.error &&
-                          state.data.length === 0 && (
-                            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                              No MCQs have been generated for this
-                              article yet.
-                            </div>
-                          )}
+                                return (
+                                  <div
+                                    key={mcq.id}
+                                    className="rounded-xl border border-slate-100 bg-slate-50/70 p-3.5"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[10px] font-bold text-slate-400">
+                                        Q{mIndex + 1}
+                                      </span>
 
-                        {state &&
-                          !state.loading &&
-                          !state.error &&
-                          state.data.length > 0 && (
-                            <div className="mt-6 space-y-6">
-                              {state.data.map(
-                                (mcq, index) => {
-                                  const answerKey = `${article.id}-${mcq.id}`;
-                                  const selected =
-                                    selectedAnswers[
-                                      answerKey
-                                    ];
+                                      <span
+                                        className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${difficultyClass(
+                                          mcq.difficulty
+                                        )}`}
+                                      >
+                                        {mcq.difficulty}
+                                      </span>
+                                    </div>
 
-                                  const answered =
-                                    Boolean(selected);
+                                    <p className="mt-2 text-xs font-bold leading-relaxed text-slate-800">
+                                      {mcq.question}
+                                    </p>
 
-                                  return (
-                                    <div
-                                      key={mcq.id}
-                                      className="border-t border-slate-100 pt-6 first:border-t-0 first:pt-0"
-                                    >
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                                          Question {index + 1}
-                                        </span>
+                                    <div className="mt-2.5 space-y-1.5">
+                                      {(["A", "B", "C", "D"] as const).map(
+                                        (opt) => {
+                                          const text = getOptionText(mcq, opt);
+                                          const isThisOption = selected === opt;
+                                          const isThisCorrect =
+                                            mcq.correct_option === opt;
 
-                                        <span
-                                          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${difficultyClass(
-                                            mcq.difficulty
-                                          )}`}
-                                        >
-                                          {mcq.difficulty}
-                                        </span>
+                                          let btnClass =
+                                            "w-full text-left text-xs p-2 rounded-lg border transition font-medium ";
 
-                                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
-                                          {mcq.topic}
-                                        </span>
-                                      </div>
-
-                                      <h4 className="mt-4 text-base font-black leading-6 text-slate-900">
-                                        {mcq.question}
-                                      </h4>
-
-                                      <div className="mt-4 grid gap-3">
-                                        {(
-                                          [
-                                            "A",
-                                            "B",
-                                            "C",
-                                            "D",
-                                          ] as const
-                                        ).map(
-                                          (option) => {
-                                            const isSelected =
-                                              selected ===
-                                              option;
-
-                                            const isCorrect =
-                                              mcq.correct_option ===
-                                              option;
-
-                                            let optionClass =
-                                              "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50";
-
-                                            if (
-                                              answered &&
-                                              isCorrect
-                                            ) {
-                                              optionClass =
-                                                "border-emerald-300 bg-emerald-50";
-                                            } else if (
-                                              answered &&
-                                              isSelected &&
-                                              !isCorrect
-                                            ) {
-                                              optionClass =
-                                                "border-red-300 bg-red-50";
-                                            } else if (
-                                              isSelected
-                                            ) {
-                                              optionClass =
-                                                "border-indigo-400 bg-indigo-50";
-                                            }
-
-                                            return (
-                                              <button
-                                                key={option}
-                                                type="button"
-                                                onClick={() =>
-                                                  selectAnswer(
-                                                    article.id,
-                                                    mcq.id,
-                                                    option
-                                                  )
-                                                }
-                                                className={`w-full rounded-xl border p-4 text-left transition ${optionClass}`}
-                                              >
-                                                <div className="flex items-start gap-3">
-                                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-black text-slate-700">
-                                                    {optionLabel(
-                                                      option
-                                                    )}
-                                                  </span>
-
-                                                  <span className="text-sm font-semibold leading-6 text-slate-800">
-                                                    {getOptionText(
-                                                      mcq,
-                                                      option
-                                                    )}
-                                                  </span>
-                                                </div>
-                                              </button>
-                                            );
+                                          if (!selected) {
+                                            btnClass +=
+                                              "bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 text-slate-700";
+                                          } else if (isThisOption && isCorrect) {
+                                            btnClass +=
+                                              "bg-emerald-50 border-emerald-300 text-emerald-800 font-bold";
+                                          } else if (
+                                            isThisOption &&
+                                            !isCorrect
+                                          ) {
+                                            btnClass +=
+                                              "bg-red-50 border-red-300 text-red-800 font-bold";
+                                          } else if (isThisCorrect) {
+                                            btnClass +=
+                                              "bg-emerald-50 border-emerald-300 text-emerald-800";
+                                          } else {
+                                            btnClass +=
+                                              "bg-white border-slate-200 text-slate-400 opacity-60";
                                           }
-                                        )}
-                                      </div>
 
-                                      {answered && (
-                                        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                          <p
-                                            className={`text-sm font-black ${
-                                              selected ===
-                                              mcq.correct_option
-                                                ? "text-emerald-700"
-                                                : "text-red-700"
-                                            }`}
-                                          >
-                                            {selected ===
-                                            mcq.correct_option
-                                              ? "Correct"
-                                              : `Incorrect — correct answer: ${mcq.correct_option}`}
-                                          </p>
-
-                                          <p className="mt-2 text-sm leading-6 text-slate-700">
-                                            {mcq.explanation}
-                                          </p>
-                                        </div>
+                                          return (
+                                            <button
+                                              key={opt}
+                                              disabled={Boolean(selected)}
+                                              onClick={() =>
+                                                selectAnswer(
+                                                  article.id,
+                                                  mcq.id,
+                                                  opt
+                                                )
+                                              }
+                                              className={btnClass}
+                                            >
+                                              <span className="font-bold mr-1.5">
+                                                {optionLabel(opt)}.
+                                              </span>
+                                              {text}
+                                            </button>
+                                          );
+                                        }
                                       )}
                                     </div>
-                                  );
-                                }
-                              )}
+
+                                    {selected && (
+                                      <div className="mt-2.5 rounded-lg bg-white p-2.5 border border-slate-200 text-[11px] leading-relaxed text-slate-600">
+                                        <p
+                                          className={`font-bold ${
+                                            isCorrect
+                                              ? "text-emerald-700"
+                                              : "text-red-700"
+                                          }`}
+                                        >
+                                          {isCorrect
+                                            ? "✓ Correct Answer"
+                                            : `✗ Incorrect (Correct: ${mcq.correct_option})`}
+                                        </p>
+                                        <p className="mt-1 text-slate-600">
+                                          {mcq.explanation}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
+
+                          {state.loading && (
+                            <p className="mt-4 text-xs font-semibold text-slate-400">
+                              Generating UPSC practice questions...
+                            </p>
+                          )}
+
+                          {state.error && (
+                            <p className="mt-4 text-xs font-semibold text-red-500">
+                              {state.error}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="mt-4 border-t border-slate-100 pt-3">
+                          {state.data.length === 0 && !state.loading && (
+                            <button
+                              onClick={() => loadMCQs(article.id)}
+                              className="w-full rounded-xl bg-blue-50 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
+                            >
+                              Practice Prelims MCQs →
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
-                  })
-                )}
-              </div>
-            </section>
+                  })}
+                </div>
+              </section>
+            )}
 
-            {/* GS REVISION */}
-            <section className="mb-10">
+            {/* GS SYLLABUS BREAKDOWN */}
+            <section className="mb-12">
               <div className="mb-4">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
-                  Syllabus mapping
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-emerald-600">
+                  Syllabus Mapping
                 </p>
 
                 <h2 className="mt-1 text-2xl font-black">
-                  Study by GS Paper
+                  GS Paper-wise Breakdown
                 </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Revision view categorized across GS Papers I to IV.
+                </p>
               </div>
 
-              <div className="grid gap-5 md:grid-cols-2">
-                {(
-                  [
-                    "GS-I",
-                    "GS-II",
-                    "GS-III",
-                    "GS-IV",
-                  ] as const
-                ).map((paper) => {
-                  const paperArticles =
-                    groupedByGs[paper].slice(0, 4);
+              <div className="grid gap-6 lg:grid-cols-2">
+                {(["GS-I", "GS-II", "GS-III", "GS-IV"] as const).map((paper) => {
+                  const list = groupedByGs[paper] ?? [];
 
                   return (
                     <div
                       key={paper}
                       className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                     >
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-black">
-                          {paper}
-                        </h3>
-
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                         <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${paperClass(
+                          className={`rounded px-2.5 py-1 text-xs font-black border ${paperClass(
                             paper
                           )}`}
                         >
-                          {groupedByGs[paper].length} articles
+                          {paper}
+                        </span>
+
+                        <span className="text-xs font-bold text-slate-400">
+                          {list.length} {list.length === 1 ? "story" : "stories"}
                         </span>
                       </div>
 
-                      <div className="mt-4 space-y-3">
-                        {paperArticles.length === 0 ? (
-                          <p className="text-sm text-slate-500">
-                            No articles currently mapped here.
-                          </p>
-                        ) : (
-                          paperArticles.map((article) => (
-                            <Link
-                              key={article.id}
-                              href={`/news/${article.id}`}
-                              className="block rounded-xl border border-slate-100 p-3 transition hover:border-slate-300 hover:bg-slate-50"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="text-sm font-bold leading-5">
-                                  {article.title}
-                                </p>
+                      {list.length === 0 ? (
+                        <p className="mt-4 text-xs text-slate-400">
+                          No articles mapped to {paper} today.
+                        </p>
+                      ) : (
+                        <div className="mt-3 divide-y divide-slate-100">
+                          {list.map((article) => (
+                            <div key={article.id} className="py-3">
+                              <Link
+                                href={`/news/${article.id}`}
+                                className="text-sm font-bold leading-snug hover:text-blue-600 transition"
+                              >
+                                {article.title}
+                              </Link>
 
-                                <span className="shrink-0 text-xs font-black text-slate-500">
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                                {article.summary}
+                              </p>
+
+                              <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                                <span>{article.category}</span>
+                                <span className="font-semibold text-slate-600">
                                   {article.upsc_relevance}/10
                                 </span>
                               </div>
-                            </Link>
-                          ))
-                        )}
-                      </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             </section>
 
-            {/* PRELIMS */}
-            <section className="mb-10 rounded-2xl border border-blue-200 bg-blue-50/50 p-6">
-              <div className="mb-5">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
-                  Prelims revision
+            {/* MAINS ANSWER PRACTICE */}
+            <section className="mb-12">
+              <div className="mb-4">
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-violet-600">
+                  Mains Practice
                 </p>
 
                 <h2 className="mt-1 text-2xl font-black">
-                  What to Remember
+                  Mains Question Bank
                 </h2>
 
-                <p className="mt-1 text-sm text-slate-600">
-                  Articles flagged by the analyzer as having
-                  useful factual or conceptual value.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                {prelimsArticles.map((article) => (
-                  <Link
-                    key={article.id}
-                    href={`/news/${article.id}`}
-                    className="rounded-xl border border-blue-100 bg-white p-4 transition hover:border-blue-300 hover:shadow-sm"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-700">
-                        PRELIMS
-                      </span>
-
-                      <span className="text-xs font-bold text-slate-500">
-                        {article.primary_gs_paper}
-                      </span>
-                    </div>
-
-                    <h3 className="mt-3 text-sm font-black leading-5">
-                      {article.title}
-                    </h3>
-
-                    {article.topics &&
-                      article.topics.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {article.topics
-                            .slice(0, 3)
-                            .map((topic) => (
-                              <span
-                                key={topic}
-                                className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600"
-                              >
-                                {topic}
-                              </span>
-                            ))}
-                        </div>
-                      )}
-                  </Link>
-                ))}
-              </div>
-            </section>
-
-            {/* MAINS */}
-            <section className="mb-10 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-6">
-              <div className="mb-5">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-emerald-600">
-                  Mains preparation
-                </p>
-
-                <h2 className="mt-1 text-2xl font-black">
-                  Issues Worth Writing About
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-600">
-                  Focus on these articles for analytical
-                  preparation and answer writing.
+                <p className="mt-1 text-sm text-slate-500">
+                  Analytical questions extracted from today&apos;s news for answer writing practice.
                 </p>
               </div>
 
@@ -907,54 +882,41 @@ export default function DailyBriefPage() {
                 {mainsArticles.map((article) => (
                   <div
                     key={article.id}
-                    className="rounded-xl border border-emerald-100 bg-white p-5"
+                    className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                        MAINS
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-violet-700">
+                        {article.primary_gs_paper} • {article.category}
                       </span>
 
-                      {article.primary_gs_paper && (
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${paperClass(
-                            article.primary_gs_paper
-                          )}`}
-                        >
-                          {article.primary_gs_paper}
-                        </span>
-                      )}
+                      <span className="text-xs font-semibold text-slate-400">
+                        {article.source}
+                      </span>
                     </div>
 
-                    <h3 className="mt-3 text-lg font-black">
+                    <h3 className="mt-2 text-base font-bold leading-snug">
                       {article.title}
                     </h3>
 
-                    {article.possible_questions &&
-                      article.possible_questions.length >
-                        0 && (
-                        <div className="mt-4 space-y-2">
+                    {Array.isArray(article.possible_questions) &&
+                      article.possible_questions.length > 0 && (
+                        <div className="mt-3 space-y-2">
                           {article.possible_questions
-                            .slice(0, 2)
-                            .map(
-                              (
-                                question,
-                                index
-                              ) => (
-                                <div
-                                  key={`${article.id}-${index}`}
-                                  className="rounded-xl bg-slate-50 p-4"
-                                >
-                                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                                    Practice Question{" "}
-                                    {index + 1}
-                                  </p>
+                            .filter(Boolean)
+                            .map((question, qIdx) => (
+                              <div
+                                key={qIdx}
+                                className="rounded-xl border border-violet-100 bg-violet-50/50 p-3"
+                              >
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-violet-700">
+                                  Question {qIdx + 1}
+                                </p>
 
-                                  <p className="mt-1 text-sm font-semibold leading-6 text-slate-800">
-                                    {question}
-                                  </p>
-                                </div>
-                              )
-                            )}
+                                <p className="mt-1 text-sm font-semibold leading-6 text-slate-800">
+                                  {question}
+                                </p>
+                              </div>
+                            ))}
                         </div>
                       )}
 
@@ -976,13 +938,11 @@ export default function DailyBriefPage() {
               </p>
 
               <h2 className="mt-2 text-2xl font-black sm:text-3xl">
-                Turn today's news into revision.
+                Turn today&apos;s news into revision.
               </h2>
 
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                Start with the highest-relevance articles,
-                review the Prelims concepts, then practice
-                the Mains questions.
+                Start with the highest-relevance articles, review the Prelims concepts, then practice the Mains questions.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-3">
