@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 const API_BASE =
@@ -127,6 +127,248 @@ function formatShortDate(dateStr: string): string {
   });
 }
 
+function CalendarPopover({
+  selectedDate,
+  availableDates,
+  todayIST,
+  onSelectDate,
+}: {
+  selectedDate: string;
+  availableDates: ArchiveDate[];
+  todayIST: string;
+  onSelectDate: (date: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const initialYearMonth = useMemo(() => {
+    const base = selectedDate || todayIST;
+    const parts = base.split("-");
+    return {
+      year: parseInt(parts[0], 10),
+      month: parseInt(parts[1], 10) - 1,
+    };
+  }, [selectedDate, todayIST]);
+
+  const [viewYear, setViewYear] = useState(initialYearMonth.year);
+  const [viewMonth, setViewMonth] = useState(initialYearMonth.month);
+
+  useEffect(() => {
+    if (selectedDate) {
+      const parts = selectedDate.split("-");
+      setViewYear(parseInt(parts[0], 10));
+      setViewMonth(parseInt(parts[1], 10) - 1);
+    }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const datesMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of availableDates) {
+      map.set(item.date, item.count);
+    }
+    return map;
+  }, [availableDates]);
+
+  const calendarDays = useMemo(() => {
+    const firstDayOfMonth = new Date(viewYear, viewMonth, 1);
+    const lastDayOfMonth = new Date(viewYear, viewMonth + 1, 0);
+    const daysInMonth = lastDayOfMonth.getDate();
+
+    let startDay = firstDayOfMonth.getDay() - 1;
+    if (startDay === -1) startDay = 6;
+
+    const days: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] = [];
+
+    for (let i = 0; i < startDay; i++) {
+      days.push({ dateStr: "", dayNum: 0, isCurrentMonth: false });
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const mm = String(viewMonth + 1).padStart(2, "0");
+      const dd = String(day).padStart(2, "0");
+      const dateStr = `${viewYear}-${mm}-${dd}`;
+      days.push({ dateStr, dayNum: day, isCurrentMonth: true });
+    }
+
+    return days;
+  }, [viewYear, viewMonth]);
+
+  const monthName = new Date(viewYear, viewMonth, 1).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const isCurrentMonthMax = useMemo(() => {
+    const todayParts = todayIST.split("-");
+    const tYear = parseInt(todayParts[0], 10);
+    const tMonth = parseInt(todayParts[1], 10) - 1;
+    return viewYear > tYear || (viewYear === tYear && viewMonth >= tMonth);
+  }, [viewYear, viewMonth, todayIST]);
+
+  function prevMonth() {
+    if (viewMonth === 0) {
+      setViewYear((y) => y - 1);
+      setViewMonth(11);
+    } else {
+      setViewMonth((m) => m - 1);
+    }
+  }
+
+  function nextMonth() {
+    if (isCurrentMonthMax) return;
+    if (viewMonth === 11) {
+      setViewYear((y) => y + 1);
+      setViewMonth(0);
+    } else {
+      setViewMonth((m) => m + 1);
+    }
+  }
+
+  return (
+    <div className="relative" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+      >
+        <span className="text-sm">📅</span>
+        <span>
+          {selectedDate ? formatShortDate(selectedDate) : "Choose date"}
+        </span>
+        <span className="text-[10px] text-slate-400">▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-72 sm:w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl ring-1 ring-black/5">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <button
+              type="button"
+              onClick={prevMonth}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100"
+              title="Previous Month"
+            >
+              ‹
+            </button>
+            <span className="text-xs font-black uppercase tracking-wider text-slate-800">
+              {monthName}
+            </span>
+            <button
+              type="button"
+              onClick={nextMonth}
+              disabled={isCurrentMonthMax}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Next Month"
+            >
+              ›
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-7 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+            <span>Sun</span>
+          </div>
+
+          <div className="mt-2 grid grid-cols-7 gap-1">
+            {calendarDays.map((cell, idx) => {
+              if (!cell.isCurrentMonth) {
+                return <div key={`empty-${idx}`} className="h-8" />;
+              }
+
+              const isFuture = cell.dateStr > todayIST;
+              const count = datesMap.get(cell.dateStr) ?? 0;
+              const isSelected = selectedDate === cell.dateStr;
+              const hasArticles = count > 0;
+
+              let btnClasses =
+                "relative flex h-8 w-full flex-col items-center justify-center rounded-lg text-xs font-semibold transition ";
+
+              if (isFuture) {
+                btnClasses += "opacity-25 cursor-not-allowed text-slate-400";
+              } else if (isSelected) {
+                btnClasses += "bg-blue-600 text-white font-black shadow-sm";
+              } else if (hasArticles) {
+                btnClasses += "bg-blue-50 text-blue-900 font-bold hover:bg-blue-100 hover:text-blue-950";
+              } else {
+                btnClasses += "text-slate-400 hover:bg-slate-100 hover:text-slate-700";
+              }
+
+              return (
+                <button
+                  key={cell.dateStr}
+                  type="button"
+                  disabled={isFuture}
+                  onClick={() => {
+                    onSelectDate(cell.dateStr);
+                    setIsOpen(false);
+                  }}
+                  className={btnClasses}
+                  title={
+                    hasArticles
+                      ? `${formatDisplayDate(cell.dateStr)}: ${count} analyzed stories`
+                      : formatDisplayDate(cell.dateStr)
+                  }
+                >
+                  <span>{cell.dayNum}</span>
+                  {hasArticles && !isSelected && (
+                    <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-blue-600" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px]">
+            <div className="flex items-center gap-1.5 text-slate-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+              <span>Available news</span>
+            </div>
+            {selectedDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectDate("");
+                  setIsOpen(false);
+                }}
+                className="font-bold text-blue-600 hover:underline"
+              >
+                Clear date
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [articles, setArticles] =
     useState<NewsArticle[]>([]);
@@ -169,28 +411,42 @@ export default function Home() {
   const todayIST = useMemo(() => getTodayIST(), []);
   const yesterdayIST = useMemo(() => getYesterdayIST(), []);
 
-  // Compute previous and next available archive dates based on sorted availableDates list
+  const todayCount = useMemo(() => {
+    return availableDates.find((d) => d.date === todayIST)?.count ?? 0;
+  }, [availableDates, todayIST]);
+
+  const yesterdayCount = useMemo(() => {
+    return availableDates.find((d) => d.date === yesterdayIST)?.count ?? 0;
+  }, [availableDates, yesterdayIST]);
+
   const { prevAvailableDate, nextAvailableDate } = useMemo(() => {
     if (!selectedDate || availableDates.length === 0) {
       return { prevAvailableDate: null, nextAvailableDate: null };
     }
-    const idx = availableDates.findIndex((d) => d.date === selectedDate);
+    // Strictly filter availableDates to dates <= todayIST with count > 0
+    const validDates = availableDates.filter(
+      (d) => d.date <= todayIST && d.count > 0
+    );
+    if (validDates.length === 0) {
+      return { prevAvailableDate: null, nextAvailableDate: null };
+    }
+
+    const idx = validDates.findIndex((d) => d.date === selectedDate);
     if (idx === -1) {
-      // If date is not in list, find closest
-      const older = availableDates.find((d) => d.date < selectedDate);
-      const newer = [...availableDates].reverse().find((d) => d.date > selectedDate);
+      const older = validDates.find((d) => d.date < selectedDate);
+      const newer = [...validDates].reverse().find((d) => d.date > selectedDate && d.date <= todayIST);
       return {
         prevAvailableDate: older ? older.date : null,
         nextAvailableDate: newer ? newer.date : null,
       };
     }
-    return {
-      prevAvailableDate: idx + 1 < availableDates.length ? availableDates[idx + 1].date : null,
-      nextAvailableDate: idx > 0 ? availableDates[idx - 1].date : null,
-    };
-  }, [selectedDate, availableDates]);
 
-  // Synchronize URL with active filters and date
+    return {
+      prevAvailableDate: idx + 1 < validDates.length ? validDates[idx + 1].date : null,
+      nextAvailableDate: idx > 0 && validDates[idx - 1].date <= todayIST ? validDates[idx - 1].date : null,
+    };
+  }, [selectedDate, availableDates, todayIST]);
+
   function syncUrl(newDate: string, newSearch = search, newCat = category, newFilter = filter) {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams();
@@ -330,9 +586,6 @@ export default function Home() {
     }
   }
 
-  /*
-   * Initialize on mount & parse query parameters from URL.
-   */
   useEffect(() => {
     fetchStats();
     fetchCategories();
@@ -363,10 +616,6 @@ export default function Home() {
     }
   }, []);
 
-  /*
-   * When search/filter/category/selectedDate changes,
-   * reset to page 1.
-   */
   useEffect(() => {
     const timer = setTimeout(() => {
       setPage(1);
@@ -375,9 +624,6 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [search, category, filter, selectedDate]);
 
-  /*
-   * Single source of truth for news fetching.
-   */
   useEffect(() => {
     fetchNews(page);
   }, [page, search, category, filter, selectedDate]);
@@ -673,7 +919,7 @@ export default function Home() {
                     <>
                       Viewing <span className="text-blue-600">{formatDisplayDate(selectedDate)}</span>
                       <span className="ml-2 font-normal text-slate-400">
-                        ({pagination?.total ?? visibleArticles.length} stories)
+                        • {pagination?.total ?? visibleArticles.length} analyzed stories
                       </span>
                     </>
                   ) : (
@@ -688,28 +934,24 @@ export default function Home() {
                     onClick={() => handleDateChange("")}
                     className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
                   >
-                    ✕ All News
+                    ✕ View All Time
                   </button>
                 )}
 
-                {/* Calendar Date Picker Input */}
-                <div className="relative flex items-center">
-                  <input
-                    type="date"
-                    max={todayIST}
-                    value={selectedDate}
-                    onChange={(e) => handleDateChange(e.target.value)}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 outline-none hover:bg-white focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                    title="Select date from calendar"
-                  />
-                </div>
+                {/* Custom UPSC Calendar Popover */}
+                <CalendarPopover
+                  selectedDate={selectedDate}
+                  availableDates={availableDates}
+                  todayIST={todayIST}
+                  onSelectDate={handleDateChange}
+                />
               </div>
             </div>
 
             {/* Quick Date Chips */}
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Quick jump:
+                Quick Jump:
               </span>
 
               <button
@@ -724,25 +966,33 @@ export default function Home() {
               </button>
 
               <button
+                disabled={todayCount === 0}
                 onClick={() => handleDateChange(todayIST)}
                 className={
-                  selectedDate === todayIST
-                    ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
-                    : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  todayCount === 0
+                    ? "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 opacity-50 cursor-not-allowed"
+                    : selectedDate === todayIST
+                      ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
+                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
                 }
+                title={todayCount === 0 ? "No articles analyzed for today yet" : `View today's news (${todayCount} stories)`}
               >
-                Today
+                Today {todayCount > 0 ? `· ${todayCount}` : ""}
               </button>
 
               <button
+                disabled={yesterdayCount === 0}
                 onClick={() => handleDateChange(yesterdayIST)}
                 className={
-                  selectedDate === yesterdayIST
-                    ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
-                    : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  yesterdayCount === 0
+                    ? "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 opacity-50 cursor-not-allowed"
+                    : selectedDate === yesterdayIST
+                      ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm"
+                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
                 }
+                title={yesterdayCount === 0 ? "No articles analyzed for yesterday" : `View yesterday's news (${yesterdayCount} stories)`}
               >
-                Yesterday
+                Yesterday {yesterdayCount > 0 ? `· ${yesterdayCount}` : ""}
               </button>
 
               {/* Recent Available Dates */}
@@ -759,7 +1009,7 @@ export default function Home() {
                         : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
                     }
                   >
-                    {formatShortDate(d.date)} ({d.count})
+                    {formatShortDate(d.date)} · {d.count}
                   </button>
                 );
               })}
@@ -771,7 +1021,7 @@ export default function Home() {
                 {prevAvailableDate ? (
                   <button
                     onClick={() => handleDateChange(prevAvailableDate)}
-                    className="flex items-center gap-1 text-blue-600 hover:underline"
+                    className="flex items-center gap-1 font-bold text-blue-600 hover:underline"
                   >
                     ← Older: {formatDisplayDate(prevAvailableDate)}
                   </button>
@@ -782,7 +1032,7 @@ export default function Home() {
                 {nextAvailableDate ? (
                   <button
                     onClick={() => handleDateChange(nextAvailableDate)}
-                    className="flex items-center gap-1 text-blue-600 hover:underline"
+                    className="flex items-center gap-1 font-bold text-blue-600 hover:underline"
                   >
                     Newer: {formatDisplayDate(nextAvailableDate)} →
                   </button>
