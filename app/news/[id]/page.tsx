@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
   "https://upsc-news-backend.onrender.com";
+
+type MainsAnswerFramework = {
+  introduction: string;
+  dimensions: string[];
+  way_forward: string;
+};
 
 type Article = {
   id: number;
@@ -32,6 +39,20 @@ type Article = {
   source_facts: string[];
   upsc_context: string[];
   possible_questions: string[];
+  mains_answer_framework?: MainsAnswerFramework | null;
+};
+
+type MCQ = {
+  id: number;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_option: "A" | "B" | "C" | "D";
+  explanation: string;
+  difficulty: "easy" | "medium" | "hard";
+  topic: string;
 };
 
 function priorityClass(priority: string) {
@@ -52,6 +73,16 @@ function relevanceLabel(score: number) {
   if (score >= 7) return "High";
   if (score >= 5) return "Moderate";
   return "Low";
+}
+
+function difficultyClass(difficulty: MCQ["difficulty"]) {
+  if (difficulty === "hard") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+  if (difficulty === "medium") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
 function normalizeArray(value: unknown): string[] {
@@ -86,6 +117,21 @@ function normalizeArray(value: unknown): string[] {
 function normalizeArticle(
   raw: Record<string, unknown>
 ): Article {
+  let mainsFramework: MainsAnswerFramework | null = null;
+  if (raw.mains_answer_framework && typeof raw.mains_answer_framework === "object") {
+    const rawF = raw.mains_answer_framework as Record<string, unknown>;
+    const intro = typeof rawF.introduction === "string" ? rawF.introduction.trim() : "";
+    const wayForward = typeof rawF.way_forward === "string" ? rawF.way_forward.trim() : "";
+    const dims = normalizeArray(rawF.dimensions);
+    if (intro || dims.length > 0 || wayForward) {
+      mainsFramework = {
+        introduction: intro,
+        dimensions: dims,
+        way_forward: wayForward,
+      };
+    }
+  }
+
   return {
     id: Number(raw.id),
 
@@ -149,8 +195,7 @@ function normalizeArticle(
         : "",
 
     why_important_for_upsc:
-      typeof raw.why_important_for_upsc ===
-      "string"
+      typeof raw.why_important_for_upsc === "string"
         ? raw.why_important_for_upsc
         : "",
 
@@ -164,6 +209,8 @@ function normalizeArticle(
       normalizeArray(
         raw.possible_questions
       ),
+
+    mains_answer_framework: mainsFramework,
   };
 }
 
@@ -180,6 +227,18 @@ export default function NewsArticlePage() {
 
   const [error, setError] =
     useState("");
+
+  const [mcqs, setMcqs] =
+    useState<MCQ[]>([]);
+
+  const [mcqsLoading, setMcqsLoading] =
+    useState(false);
+
+  const [mcqsError, setMcqsError] =
+    useState("");
+
+  const [selectedAnswers, setSelectedAnswers] =
+    useState<Record<number, "A" | "B" | "C" | "D">>({});
 
   useEffect(() => {
     if (!id) return;
@@ -227,8 +286,42 @@ export default function NewsArticlePage() {
       }
     }
 
+    async function loadMCQs() {
+      try {
+        setMcqsLoading(true);
+        setMcqsError("");
+
+        const res = await fetch(
+          `${API_BASE}/api/news/${id}/mcqs`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.mcqs)) {
+            setMcqs(data.mcqs);
+          }
+        }
+      } catch (err) {
+        console.error("MCQ fetch error:", err);
+        setMcqsError("Unable to load prelims questions at this time.");
+      } finally {
+        setMcqsLoading(false);
+      }
+    }
+
     loadArticle();
+    loadMCQs();
   }, [id]);
+
+  function handleSelectOption(mcqId: number, option: "A" | "B" | "C" | "D") {
+    setSelectedAnswers((prev) => {
+      if (prev[mcqId]) return prev;
+      return { ...prev, [mcqId]: option };
+    });
+  }
 
   if (loading) {
     return (
@@ -699,7 +792,7 @@ export default function NewsArticlePage() {
             </section>
 
 
-            {/* QUESTIONS */}
+            {/* QUESTIONS & MAINS ANSWER FRAMEWORK */}
 
             <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
 
@@ -716,7 +809,7 @@ export default function NewsArticlePage() {
                   </p>
 
                   <h2 className="mt-0.5 text-xl font-black tracking-tight">
-                    Possible UPSC questions
+                    Mains Questions & Answer Framework
                   </h2>
 
                 </div>
@@ -759,6 +852,295 @@ export default function NewsArticlePage() {
 
                 <p className="mt-6 text-sm text-slate-400">
                   No questions were generated.
+                </p>
+
+              )}
+
+
+              {/* STRUCTURED MAINS ANSWER FRAMEWORK */}
+
+              {article.mains_answer_framework && (
+
+                <div className="mt-8 rounded-2xl border border-violet-100 bg-violet-50/50 p-6 sm:p-7">
+
+                  <div className="flex items-center gap-2.5">
+
+                    <span className="rounded-md bg-violet-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white">
+                      Mains Answer Framework
+                    </span>
+
+                    <span className="text-xs font-bold text-violet-900">
+                      Standard GS Answer Structure
+                    </span>
+
+                  </div>
+
+
+                  {/* INTRODUCTION */}
+
+                  <div className="mt-5">
+
+                    <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                      1. Introduction & Contextual Anchor
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-7 text-slate-800 sm:text-base">
+                      {article.mains_answer_framework.introduction}
+                    </p>
+
+                  </div>
+
+
+                  {/* KEY DIMENSIONS */}
+
+                  {article.mains_answer_framework.dimensions.length > 0 && (
+
+                    <div className="mt-6 border-t border-violet-100 pt-5">
+
+                      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                        2. Key Analytical Dimensions & Core Body
+                      </h3>
+
+                      <ul className="mt-3 space-y-3">
+
+                        {article.mains_answer_framework.dimensions.map(
+                          (dim, dIndex) => (
+
+                            <li
+                              key={`${dim}-${dIndex}`}
+                              className="flex gap-3 rounded-xl bg-white p-3.5 shadow-sm"
+                            >
+
+                              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-violet-100 text-xs font-bold text-violet-700">
+                                {dIndex + 1}
+                              </span>
+
+                              <p className="text-sm leading-6 text-slate-700">
+                                {dim}
+                              </p>
+
+                            </li>
+
+                          )
+                        )}
+
+                      </ul>
+
+                    </div>
+
+                  )}
+
+
+                  {/* WAY FORWARD */}
+
+                  <div className="mt-6 border-t border-violet-100 pt-5">
+
+                    <h3 className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                      3. Way Forward & Conclusion
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-7 text-slate-800 sm:text-base">
+                      {article.mains_answer_framework.way_forward}
+                    </p>
+
+                  </div>
+
+                </div>
+
+              )}
+
+            </section>
+
+
+            {/* PRELIMS PRACTICE (MCQs) */}
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+
+              <div className="flex items-center justify-between border-b border-slate-100 pb-5">
+
+                <div className="flex items-center gap-3">
+
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-sm font-black text-emerald-600">
+                    06
+                  </div>
+
+                  <div>
+
+                    <p className="text-[10px] font-black uppercase tracking-[0.15em] text-emerald-600">
+                      Prelims Test Series
+                    </p>
+
+                    <h2 className="mt-0.5 text-xl font-black tracking-tight">
+                      UPSC Prelims Practice
+                    </h2>
+
+                  </div>
+
+                </div>
+
+                {mcqs.length > 0 && (
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                    {mcqs.length} MCQs
+                  </span>
+                )}
+
+              </div>
+
+
+              {mcqsLoading ? (
+
+                <div className="mt-7 space-y-4">
+
+                  <div className="h-6 w-48 animate-pulse rounded bg-slate-100" />
+                  <div className="h-24 w-full animate-pulse rounded-xl bg-slate-100" />
+                  <div className="h-24 w-full animate-pulse rounded-xl bg-slate-100" />
+
+                </div>
+
+              ) : mcqs.length > 0 ? (
+
+                <div className="mt-7 space-y-8">
+
+                  {mcqs.map((mcq, qIdx) => {
+                    const selected = selectedAnswers[mcq.id];
+                    const isAnswered = selected !== undefined;
+                    const isCorrect = selected === mcq.correct_option;
+
+                    return (
+                      <div
+                        key={mcq.id}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5 sm:p-6"
+                      >
+
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+
+                          <span className="text-xs font-black uppercase tracking-wider text-slate-500">
+                            Question {qIdx + 1}
+                          </span>
+
+                          <div className="flex items-center gap-2">
+
+                            <span
+                              className={`rounded-md border px-2 py-0.5 text-[10px] font-black uppercase ${difficultyClass(
+                                mcq.difficulty
+                              )}`}
+                            >
+                              {mcq.difficulty}
+                            </span>
+
+                            {mcq.topic && (
+                              <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200">
+                                {mcq.topic}
+                              </span>
+                            )}
+
+                          </div>
+
+                        </div>
+
+
+                        <p className="mt-4 text-base font-bold leading-7 text-slate-900">
+                          {mcq.question}
+                        </p>
+
+
+                        <div className="mt-5 grid gap-2.5">
+
+                          {(
+                            [
+                              ["A", mcq.option_a],
+                              ["B", mcq.option_b],
+                              ["C", mcq.option_c],
+                              ["D", mcq.option_d],
+                            ] as const
+                          ).map(([optKey, optText]) => {
+                            let btnStyle =
+                              "border-slate-200 bg-white hover:border-slate-300 text-slate-800";
+
+                            if (isAnswered) {
+                              if (optKey === mcq.correct_option) {
+                                btnStyle =
+                                  "border-emerald-500 bg-emerald-50 text-emerald-950 font-semibold ring-1 ring-emerald-400";
+                              } else if (selected === optKey) {
+                                btnStyle =
+                                  "border-red-400 bg-red-50 text-red-950 ring-1 ring-red-300";
+                              } else {
+                                btnStyle =
+                                  "border-slate-200 bg-slate-100/60 text-slate-400 opacity-60";
+                              }
+                            }
+
+                            return (
+                              <button
+                                key={optKey}
+                                type="button"
+                                onClick={() => handleSelectOption(mcq.id, optKey)}
+                                disabled={isAnswered}
+                                className={`flex w-full items-start gap-3.5 rounded-xl border p-3.5 text-left text-sm transition ${btnStyle}`}
+                              >
+
+                                <span
+                                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-black ${
+                                    isAnswered && optKey === mcq.correct_option
+                                      ? "bg-emerald-600 text-white"
+                                      : isAnswered && selected === optKey
+                                      ? "bg-red-600 text-white"
+                                      : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {optKey}
+                                </span>
+
+                                <span className="pt-0.5 leading-6">
+                                  {optText}
+                                </span>
+
+                              </button>
+                            );
+                          })}
+
+                        </div>
+
+
+                        {isAnswered && (
+
+                          <div
+                            className={`mt-5 rounded-xl border p-4.5 text-sm leading-6 ${
+                              isCorrect
+                                ? "border-emerald-200 bg-emerald-50/70 text-emerald-950"
+                                : "border-amber-200 bg-amber-50/70 text-amber-950"
+                            }`}
+                          >
+
+                            <div className="flex items-center gap-2 font-black">
+
+                              <span>
+                                {isCorrect
+                                  ? "✓ Correct Answer"
+                                  : `✕ Incorrect (Correct: Option ${mcq.correct_option})`}
+                              </span>
+
+                            </div>
+
+                            <p className="mt-2 text-xs leading-6 opacity-95">
+                              <span className="font-bold">Explanation:</span>{" "}
+                              {mcq.explanation}
+                            </p>
+
+                          </div>
+
+                        )}
+
+                      </div>
+                    );
+                  })}
+
+                </div>
+
+              ) : (
+
+                <p className="mt-6 text-sm text-slate-400">
+                  {mcqsError || "Prelims questions will be available shortly."}
                 </p>
 
               )}
