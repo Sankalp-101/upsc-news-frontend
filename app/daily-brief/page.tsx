@@ -149,7 +149,11 @@ export default function DailyBriefPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [availableDates, setAvailableDates] = useState<ArchiveDate[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const p = new URLSearchParams(window.location.search).get("date");
+    return p && /^\d{4}-\d{2}-\d{2}$/.test(p) ? p : "";
+  });
 
   const [mcqsByArticle, setMcqsByArticle] =
     useState<Record<number, MCQState>>({});
@@ -159,70 +163,70 @@ export default function DailyBriefPage() {
       {}
     );
 
-  async function loadBrief(targetDate = selectedDate) {
-    try {
-      setLoading(true);
-      setError("");
-
-      const url = targetDate
-        ? `${API_BASE}/api/news?page=1&limit=48&date=${targetDate}`
-        : `${API_BASE}/api/news?page=1&limit=48`;
-
-      const response = await fetch(url, {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Backend returned ${response.status}`
-        );
-      }
-
-      const data: ApiResponse =
-        await response.json();
-
-      setArticles(data.articles ?? []);
-    } catch (err) {
-      console.error(err);
-      setError(
-        "Unable to load UPSC brief for this date."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchArchiveDates() {
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/archive/dates`,
-        {
-          cache: "no-store",
-        }
-      );
-      if (!response.ok) return;
-      const data = await response.json();
-      setAvailableDates(
-        Array.isArray(data?.available_dates) ? data.available_dates : []
-      );
-    } catch (err) {
-      console.error("Unable to fetch archive dates", err);
-    }
-  }
-
   useEffect(() => {
-    fetchArchiveDates();
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const urlDate = params.get("date");
-      if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) {
-        setSelectedDate(urlDate);
-        loadBrief(urlDate);
-        return;
+    let ignore = false;
+
+    async function loadBriefData() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const archivePromise = fetch(`${API_BASE}/api/archive/dates`, {
+          cache: "no-store",
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .catch((err) => {
+            console.error("Unable to fetch archive dates", err);
+            return null;
+          });
+
+        const newsUrl = selectedDate
+          ? `${API_BASE}/api/news?page=1&limit=48&date=${selectedDate}`
+          : `${API_BASE}/api/news?page=1&limit=48`;
+
+        const newsPromise = fetch(newsUrl, {
+          cache: "no-store",
+        });
+
+        const [archiveData, newsRes] = await Promise.all([
+          archivePromise,
+          newsPromise,
+        ]);
+
+        if (
+          !ignore &&
+          archiveData &&
+          Array.isArray(archiveData.available_dates)
+        ) {
+          setAvailableDates(archiveData.available_dates);
+        }
+
+        if (!newsRes.ok) {
+          throw new Error(`Backend returned ${newsRes.status}`);
+        }
+
+        const data: ApiResponse = await newsRes.json();
+        if (!ignore) {
+          setArticles(data.articles ?? []);
+        }
+      } catch (err) {
+        console.error(err);
+        if (!ignore) {
+          setError("Unable to load UPSC brief for this date.");
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
       }
     }
-    loadBrief("");
-  }, []);
+
+    loadBriefData();
+
+    return () => {
+      ignore = true;
+    };
+  }, [selectedDate]);
 
   function handleDateSelect(newDate: string) {
     setSelectedDate(newDate);
@@ -230,7 +234,6 @@ export default function DailyBriefPage() {
       const newUrl = newDate ? `/daily-brief?date=${newDate}` : "/daily-brief";
       window.history.pushState(null, "", newUrl);
     }
-    loadBrief(newDate);
   }
 
   const sortedArticles = useMemo(() => {

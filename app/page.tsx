@@ -153,13 +153,18 @@ function CalendarPopover({
   const [viewYear, setViewYear] = useState(initialYearMonth.year);
   const [viewMonth, setViewMonth] = useState(initialYearMonth.month);
 
-  useEffect(() => {
-    if (selectedDate) {
-      const parts = selectedDate.split("-");
-      setViewYear(parseInt(parts[0], 10));
-      setViewMonth(parseInt(parts[1], 10) - 1);
-    }
-  }, [selectedDate]);
+  function handleToggleOpen() {
+    setIsOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        const base = selectedDate || todayIST;
+        const parts = base.split("-");
+        setViewYear(parseInt(parts[0], 10));
+        setViewMonth(parseInt(parts[1], 10) - 1);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -249,7 +254,7 @@ function CalendarPopover({
     <div className="relative" ref={popoverRef}>
       <button
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
+        onClick={handleToggleOpen}
         className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-100"
         aria-haspopup="dialog"
         aria-expanded={isOpen}
@@ -385,28 +390,36 @@ export default function Home() {
   const [availableDates, setAvailableDates] =
     useState<ArchiveDate[]>([]);
 
-  const [selectedDate, setSelectedDate] =
-    useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const p = new URLSearchParams(window.location.search).get("date");
+    return p && /^\d{4}-\d{2}-\d{2}$/.test(p) ? p : "";
+  });
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [error, setError] =
-    useState("");
+  const [filter, setFilter] = useState<FilterType>(() => {
+    if (typeof window === "undefined") return "ALL";
+    const f = new URLSearchParams(window.location.search).get("filter") as FilterType;
+    return f && syllabusFilters.some((item) => item.value === f) ? f : "ALL";
+  });
 
-  const [filter, setFilter] =
-    useState<FilterType>("ALL");
+  const [category, setCategory] = useState<string>(() => {
+    if (typeof window === "undefined") return "ALL";
+    return new URLSearchParams(window.location.search).get("category") || "ALL";
+  });
 
-  const [category, setCategory] =
-    useState("ALL");
+  const [search, setSearch] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("search") || "";
+  });
 
-  const [search, setSearch] =
-    useState("");
-
-  const [page, setPage] =
-    useState(1);
+  const [page, setPage] = useState(1);
 
   const limit = 48;
+
+  const [reloadKey, setReloadKey] = useState(0);
 
   const todayIST = useMemo(() => getTodayIST(), []);
   const yesterdayIST = useMemo(() => getYesterdayIST(), []);
@@ -466,154 +479,45 @@ export default function Home() {
     syncUrl(newDate, search, category, filter);
   }
 
-  async function fetchNews(targetPage = page) {
-    try {
-      setLoading(true);
-      setError("");
-
-      const params = new URLSearchParams();
-
-      params.set("page", String(targetPage));
-      params.set("limit", String(limit));
-
-      if (selectedDate) {
-        params.set("date", selectedDate);
-      }
-
-      if (search.trim()) {
-        params.set("search", search.trim());
-      }
-
-      if (category !== "ALL") {
-        params.set("category", category);
-      }
-
-      if (
-        filter !== "ALL" &&
-        filter !== "PRELIMS" &&
-        filter !== "MAINS"
-      ) {
-        params.set("gs_paper", filter);
-      }
-
-      const response = await fetch(
-        `${API_BASE}/api/news?${params.toString()}`,
-        {
-          cache: "no-store",
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch news: ${response.status}`
-        );
-      }
-
-      const data = await response.json();
-
-      const receivedArticles = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.articles)
-          ? data.articles
-          : [];
-
-      setArticles(receivedArticles);
-
-      if (data && data.pagination) {
-        setPagination(data.pagination);
-      } else {
-        setPagination(null);
-      }
-    } catch (err) {
-      console.error("Unable to fetch news:", err);
-      setArticles([]);
-      setPagination(null);
-      setError("Unable to connect to the news server.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchStats() {
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/stats`,
-        {
-          cache: "no-store",
-        }
-      );
-      if (!response.ok) return;
-      const data = await response.json();
-      setStats(data);
-    } catch (err) {
-      console.error("Unable to fetch stats", err);
-    }
-  }
-
-  async function fetchCategories() {
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/categories`,
-        {
-          cache: "no-store",
-        }
-      );
-      if (!response.ok) return;
-      const data = await response.json();
-      setCategories(
-        Array.isArray(data?.categories) ? data.categories : []
-      );
-    } catch (err) {
-      console.error("Unable to fetch categories", err);
-    }
-  }
-
-  async function fetchArchiveDates() {
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/archive/dates`,
-        {
-          cache: "no-store",
-        }
-      );
-      if (!response.ok) return;
-      const data = await response.json();
-      setAvailableDates(
-        Array.isArray(data?.available_dates) ? data.available_dates : []
-      );
-    } catch (err) {
-      console.error("Unable to fetch archive dates", err);
-    }
-  }
-
   useEffect(() => {
-    fetchStats();
-    fetchCategories();
-    fetchArchiveDates();
+    let ignore = false;
 
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const initialDate = params.get("date");
-      const initialSearch = params.get("search");
-      const initialCategory = params.get("category");
-      const initialFilter = params.get("filter") as FilterType;
+    async function loadMetadata() {
+      try {
+        const [statsRes, catRes, archiveRes] = await Promise.all([
+          fetch(`${API_BASE}/api/stats`, { cache: "no-store" }),
+          fetch(`${API_BASE}/api/categories`, { cache: "no-store" }),
+          fetch(`${API_BASE}/api/archive/dates`, { cache: "no-store" }),
+        ]);
 
-      if (initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate)) {
-        setSelectedDate(initialDate);
-      }
-      if (initialSearch) {
-        setSearch(initialSearch);
-      }
-      if (initialCategory) {
-        setCategory(initialCategory);
-      }
-      if (
-        initialFilter &&
-        syllabusFilters.some((f) => f.value === initialFilter)
-      ) {
-        setFilter(initialFilter);
+        if (!ignore && statsRes.ok) {
+          const statsData = await statsRes.json();
+          setStats(statsData);
+        }
+        if (!ignore && catRes.ok) {
+          const catData = await catRes.json();
+          setCategories(
+            Array.isArray(catData?.categories) ? catData.categories : []
+          );
+        }
+        if (!ignore && archiveRes.ok) {
+          const archiveData = await archiveRes.json();
+          setAvailableDates(
+            Array.isArray(archiveData?.available_dates)
+              ? archiveData.available_dates
+              : []
+          );
+        }
+      } catch (err) {
+        console.error("Unable to load initial metadata:", err);
       }
     }
+
+    loadMetadata();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -625,8 +529,81 @@ export default function Home() {
   }, [search, category, filter, selectedDate]);
 
   useEffect(() => {
-    fetchNews(page);
-  }, [page, search, category, filter, selectedDate]);
+    let ignore = false;
+
+    async function loadNews() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("limit", String(limit));
+
+        if (selectedDate) {
+          params.set("date", selectedDate);
+        }
+        if (search.trim()) {
+          params.set("search", search.trim());
+        }
+        if (category !== "ALL") {
+          params.set("category", category);
+        }
+        if (
+          filter !== "ALL" &&
+          filter !== "PRELIMS" &&
+          filter !== "MAINS"
+        ) {
+          params.set("gs_paper", filter);
+        }
+
+        const response = await fetch(
+          `${API_BASE}/api/news?${params.toString()}`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch news: ${response.status}`
+          );
+        }
+
+        const data = await response.json();
+        if (!ignore) {
+          const receivedArticles = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.articles)
+              ? data.articles
+              : [];
+          setArticles(receivedArticles);
+          if (data && data.pagination) {
+            setPagination(data.pagination);
+          } else {
+            setPagination(null);
+          }
+        }
+      } catch (err) {
+        console.error("Unable to fetch news:", err);
+        if (!ignore) {
+          setArticles([]);
+          setPagination(null);
+          setError("Unable to connect to the news server.");
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadNews();
+
+    return () => {
+      ignore = true;
+    };
+  }, [page, search, category, filter, selectedDate, reloadKey]);
 
   const topArticles = useMemo(() => {
     return [...articles]
@@ -720,7 +697,7 @@ export default function Home() {
                 Current Affairs, Filtered for the Civil Services.
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-                Curated exclusively from trusted editorial and authoritative sources: The Hindu, Indian Express, Livemint, PIB, RBI, PRS, NITI Aayog, MEA, and Down To Earth.
+                Curated across 15 authoritative primary sources: The Hindu (National & International), Indian Express (India & Explained), Livemint, PIB, RBI (Press Releases & Notifications), Down To Earth, DD India, IndiaSpend, Mongabay India, Centre for Policy Research, LiveLaw, and NITI Aayog.
               </p>
             </div>
 
@@ -1173,7 +1150,7 @@ export default function Home() {
                   Check your backend deployment and try again.
                 </p>
                 <button
-                  onClick={() => fetchNews(page)}
+                  onClick={() => setReloadKey((k) => k + 1)}
                   className="mt-5 rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white"
                 >
                   Try again
