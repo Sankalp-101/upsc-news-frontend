@@ -68,6 +68,13 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://upsc-news-backend.onrender.com";
 
+function getTodayIST(): string {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const ist = new Date(utc + 3600000 * 5.5);
+  return ist.toISOString().slice(0, 10);
+}
+
 function formatDate(dateString?: string) {
   if (!dateString) return "";
 
@@ -152,6 +159,7 @@ export default function DailyBriefPage() {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     const p = new URLSearchParams(window.location.search).get("date");
+    if (p === "all") return "all";
     return p && /^\d{4}-\d{2}-\d{2}$/.test(p) ? p : "";
   });
 
@@ -162,6 +170,8 @@ export default function DailyBriefPage() {
     useState<Record<string, "A" | "B" | "C" | "D">>(
       {}
     );
+
+  const todayIST = useMemo(() => getTodayIST(), []);
 
   useEffect(() => {
     let ignore = false;
@@ -180,26 +190,40 @@ export default function DailyBriefPage() {
             return null;
           });
 
-        const newsUrl = selectedDate
-          ? `${API_BASE}/api/news?page=1&limit=48&date=${selectedDate}`
+        const archiveData = await archivePromise;
+        let validDates: ArchiveDate[] = [];
+        if (archiveData && Array.isArray(archiveData.available_dates)) {
+          validDates = archiveData.available_dates;
+          if (!ignore) {
+            setAvailableDates(validDates);
+          }
+        }
+
+        // Determine effective query date:
+        // 1. Explicit YYYY-MM-DD in selectedDate -> use selectedDate
+        // 2. Explicit 'all' in selectedDate -> use "" (unfiltered all-time)
+        // 3. Unset selectedDate ("") -> check if today has stories, else fallback to latest archive date
+        let effectiveDate = "";
+        if (selectedDate === "all") {
+          effectiveDate = "";
+        } else if (selectedDate) {
+          effectiveDate = selectedDate;
+        } else {
+          const todayItem = validDates.find((d) => d.date === todayIST && d.count > 0);
+          if (todayItem) {
+            effectiveDate = todayIST;
+          } else if (validDates.length > 0) {
+            effectiveDate = validDates[0].date;
+          }
+        }
+
+        const newsUrl = effectiveDate
+          ? `${API_BASE}/api/news?page=1&limit=48&date=${effectiveDate}`
           : `${API_BASE}/api/news?page=1&limit=48`;
 
-        const newsPromise = fetch(newsUrl, {
+        const newsRes = await fetch(newsUrl, {
           cache: "no-store",
         });
-
-        const [archiveData, newsRes] = await Promise.all([
-          archivePromise,
-          newsPromise,
-        ]);
-
-        if (
-          !ignore &&
-          archiveData &&
-          Array.isArray(archiveData.available_dates)
-        ) {
-          setAvailableDates(archiveData.available_dates);
-        }
 
         if (!newsRes.ok) {
           throw new Error(`Backend returned ${newsRes.status}`);
@@ -226,15 +250,29 @@ export default function DailyBriefPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedDate]);
+  }, [selectedDate, todayIST]);
 
   function handleDateSelect(newDate: string) {
     setSelectedDate(newDate);
     if (typeof window !== "undefined") {
-      const newUrl = newDate ? `/daily-brief?date=${newDate}` : "/daily-brief";
+      const newUrl =
+        newDate === "all"
+          ? "/daily-brief?date=all"
+          : newDate
+            ? `/daily-brief?date=${newDate}`
+            : "/daily-brief";
       window.history.pushState(null, "", newUrl);
     }
   }
+
+  const activeDisplayDate = useMemo(() => {
+    if (selectedDate === "all") return "";
+    if (selectedDate) return selectedDate;
+    const hasToday = availableDates.some((d) => d.date === todayIST && d.count > 0);
+    if (hasToday) return todayIST;
+    if (availableDates.length > 0) return availableDates[0].date;
+    return "";
+  }, [selectedDate, availableDates, todayIST]);
 
   const sortedArticles = useMemo(() => {
     return [...articles].sort(
@@ -245,12 +283,27 @@ export default function DailyBriefPage() {
   }, [articles]);
 
   const mustRead = useMemo(() => {
-    return sortedArticles
-      .filter(
-        (article) =>
-          (article.upsc_relevance ?? 0) >= 7
-      )
-      .slice(0, 6);
+    const eligible = sortedArticles.filter(
+      (article) => (article.upsc_relevance ?? 0) >= 7
+    );
+
+    const selected: Article[] = [];
+    const publisherCounts = new Map<string, number>();
+
+    // Select up to 6 articles with strict hard constraint of max 2 articles per publisher
+    for (const article of eligible) {
+      if (selected.length >= 6) break;
+
+      const source = (article.source || "Unknown").trim();
+      const count = publisherCounts.get(source) ?? 0;
+
+      if (count < 2) {
+        selected.push(article);
+        publisherCounts.set(source, count + 1);
+      }
+    }
+
+    return selected;
   }, [sortedArticles]);
 
   const mcqArticles = useMemo(() => {
@@ -397,9 +450,13 @@ export default function DailyBriefPage() {
               </p>
 
               <h1 className="mt-2 text-4xl font-black tracking-tight">
-                {selectedDate
-                  ? `Brief for ${formatDate(selectedDate)}`
-                  : "Today's Current Affairs"}
+                {selectedDate === "all"
+                  ? "All-Time Current Affairs"
+                  : activeDisplayDate === todayIST
+                    ? "Today's Current Affairs"
+                    : activeDisplayDate
+                      ? `Brief for ${formatDate(activeDisplayDate)}`
+                      : "Today's Current Affairs"}
               </h1>
 
               <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600">
@@ -414,23 +471,31 @@ export default function DailyBriefPage() {
                   Select Date:
                 </span>
                 <select
-                  value={selectedDate}
+                  value={selectedDate || activeDisplayDate}
                   onChange={(e) => handleDateSelect(e.target.value)}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 outline-none focus:border-blue-500"
                 >
-                  <option value="">Latest Today</option>
-                  {availableDates.map((d) => (
-                    <option key={d.date} value={d.date}>
-                      {formatDate(d.date)} ({d.count} stories)
+                  {availableDates.some((d) => d.date === todayIST) && (
+                    <option value={todayIST}>
+                      Today ({formatDate(todayIST)})
                     </option>
-                  ))}
+                  )}
+                  {availableDates.map((d) => {
+                    if (d.date === todayIST) return null;
+                    return (
+                      <option key={d.date} value={d.date}>
+                        {formatDate(d.date)} ({d.count} stories)
+                      </option>
+                    );
+                  })}
+                  <option value="all">All Time (Unfiltered)</option>
                 </select>
                 {selectedDate && (
                   <button
                     onClick={() => handleDateSelect("")}
                     className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
                   >
-                    Reset
+                    Reset to Today
                   </button>
                 )}
               </div>

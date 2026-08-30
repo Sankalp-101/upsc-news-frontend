@@ -606,9 +606,7 @@ export default function Home() {
   }, [page, search, category, filter, selectedDate, reloadKey]);
 
   const topArticles = useMemo(() => {
-    return [...articles]
-      .sort((a, b) => b.upsc_relevance - a.upsc_relevance)
-      .slice(0, 3);
+    return articles.slice(0, 3);
   }, [articles]);
 
   const visibleArticles = useMemo(() => {
