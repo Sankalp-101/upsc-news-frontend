@@ -417,7 +417,7 @@ export default function Home() {
 
   const [page, setPage] = useState(1);
 
-  const limit = 48;
+  const limit = 12;
 
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -549,11 +549,11 @@ export default function Home() {
         if (category !== "ALL") {
           params.set("category", category);
         }
-        if (
-          filter !== "ALL" &&
-          filter !== "PRELIMS" &&
-          filter !== "MAINS"
-        ) {
+        if (filter === "PRELIMS") {
+          params.set("prelims", "true");
+        } else if (filter === "MAINS") {
+          params.set("mains", "true");
+        } else if (filter !== "ALL") {
           params.set("gs_paper", filter);
         }
 
@@ -609,18 +609,6 @@ export default function Home() {
     return articles.slice(0, 3);
   }, [articles]);
 
-  const visibleArticles = useMemo(() => {
-    if (filter !== "PRELIMS" && filter !== "MAINS") {
-      return articles;
-    }
-
-    return articles.filter((article) =>
-      filter === "PRELIMS"
-        ? article.prelims_relevance
-        : article.mains_relevance
-    );
-  }, [articles, filter]);
-
   function clearFilters() {
     setSearch("");
     setFilter("ALL");
@@ -632,17 +620,7 @@ export default function Home() {
     }
   }
 
-  const totalFilteredArticles = visibleArticles.length;
-
-  const totalPages =
-    filter === "PRELIMS" || filter === "MAINS"
-      ? Math.max(1, Math.ceil(totalFilteredArticles / 12))
-      : pagination?.pages ?? 1;
-
-  const paginatedVisibleArticles =
-    filter === "PRELIMS" || filter === "MAINS"
-      ? visibleArticles.slice((page - 1) * 12, page * 12)
-      : visibleArticles;
+  const totalPages = pagination?.pages ?? 1;
 
   return (
     <main className="min-h-screen bg-[#f5f7fa] text-slate-950">
@@ -894,7 +872,7 @@ export default function Home() {
                     <>
                       Viewing <span className="text-blue-600">{formatDisplayDate(selectedDate)}</span>
                       <span className="ml-2 font-normal text-slate-400">
-                        • {pagination?.total ?? visibleArticles.length} analyzed stories
+                        • {pagination?.total ?? articles.length} analyzed stories
                       </span>
                     </>
                   ) : (
@@ -1157,7 +1135,7 @@ export default function Home() {
             )}
 
             {/* EMPTY STATE */}
-            {!loading && !error && visibleArticles.length === 0 && (
+            {!loading && !error && articles.length === 0 && (
               <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-500">
                   📅
@@ -1194,9 +1172,9 @@ export default function Home() {
             {/* ARTICLES */}
             {!loading &&
               !error &&
-              paginatedVisibleArticles.length > 0 && (
+              articles.length > 0 && (
                 <div className="grid gap-4 lg:grid-cols-2">
-                  {paginatedVisibleArticles.map((article) => (
+                  {articles.map((article) => (
                     <article
                       key={article.id}
                       className="group rounded-2xl border border-slate-200 bg-white p-6 transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg"
